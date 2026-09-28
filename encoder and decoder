@@ -1,0 +1,1952 @@
+// ============================================================
+// CRYPTO TOOL ULTIMATE — красивая версия с тёмной темой
+// Часть 1/2: ядро, тема, кастомный UI
+// ============================================================
+#define _CRT_SECURE_NO_WARNINGS
+#define NOMINMAX
+#define WIN32_LEAN_AND_MEAN
+
+#include <windows.h>
+#include <windowsx.h>
+#include <commctrl.h>
+#include <shellapi.h>
+#include <shlobj.h>
+#include <dwmapi.h>
+#include <uxtheme.h>
+
+#include <vector>
+#include <string>
+#include <sstream>
+#include <algorithm>
+#include <cstring>
+#include <cctype>
+#include <cwctype>
+#include <ctime>
+#include <cmath>
+
+#pragma comment(lib, "user32.lib")
+#pragma comment(lib, "gdi32.lib")
+#pragma comment(lib, "shell32.lib")
+#pragma comment(lib, "comctl32.lib")
+#pragma comment(lib, "Msimg32.lib")
+#pragma comment(lib, "dwmapi.lib")
+#pragma comment(lib, "uxtheme.lib")
+#pragma comment(linker,"\"/manifestdependency:type='win32' \
+name='Microsoft.Windows.Common-Controls' version='6.0.0.0' \
+processorArchitecture='*' publicKeyToken='6595b64144ccf1df' language='*'\"")
+
+using namespace std;
+
+// ============================================================
+// КОНСТАНТЫ
+// ============================================================
+const int WINDOW_W = 1400;
+const int WINDOW_H = 900;
+
+#define IDC_EDIT_INPUT     2001
+#define IDC_EDIT_OUTPUT    2002
+#define IDC_COMBO_MODE     2003
+#define IDC_EDIT_KEY       2004
+#define IDC_BTN_ENCODE     2005
+#define IDC_BTN_DECODE     2006
+#define IDC_BTN_CLEAR      2007
+#define IDC_BTN_COPY_OUT   2008
+#define IDC_BTN_PASTE      2009
+#define IDC_BTN_LOAD       2010
+#define IDC_BTN_SAVE       2011
+#define IDC_BTN_SWAP       2012
+#define IDC_STATIC_INFO    2013
+#define IDC_BTN_OPEN_DIR   2014
+#define IDC_HISTORY_LIST   2015
+#define IDC_BTN_HISTORY_CLR 2016
+#define IDC_TAB_MAIN       2017
+#define IDC_COMBO_THEME    2018
+
+// ============================================================
+// ЦВЕТА — тёмная тема
+// ============================================================
+const COLORREF COL_BG = RGB(18, 20, 28);
+const COLORREF COL_BG2 = RGB(24, 26, 36);
+const COLORREF COL_PANEL = RGB(30, 34, 46);
+const COLORREF COL_PANEL_LIGHT = RGB(38, 42, 56);
+const COLORREF COL_PANEL_HOVER = RGB(48, 54, 72);
+const COLORREF COL_BORDER = RGB(58, 64, 84);
+const COLORREF COL_BORDER_LT = RGB(80, 88, 116);
+
+const COLORREF COL_ACCENT = RGB(90, 150, 255);
+const COLORREF COL_ACCENT_LT = RGB(140, 180, 255);
+const COLORREF COL_ACCENT_DK = RGB(50, 90, 180);
+const COLORREF COL_SUCCESS = RGB(80, 220, 130);
+const COLORREF COL_WARNING = RGB(255, 190, 80);
+const COLORREF COL_ERROR = RGB(240, 90, 100);
+const COLORREF COL_INFO = RGB(100, 200, 240);
+const COLORREF COL_PURPLE = RGB(180, 120, 255);
+
+const COLORREF COL_TEXT = RGB(230, 234, 245);
+const COLORREF COL_TEXT_DIM = RGB(150, 158, 180);
+const COLORREF COL_TEXT_FAINT = RGB(100, 108, 130);
+const COLORREF COL_TEXT_BRIGHT = RGB(255, 255, 255);
+
+const COLORREF COL_EDITOR_BG = RGB(22, 25, 34);
+const COLORREF COL_EDITOR_TEXT = RGB(200, 220, 240);
+const COLORREF COL_EDITOR_SEL = RGB(60, 100, 180);
+const COLORREF COL_CURSOR = RGB(255, 200, 80);
+
+// ============================================================
+// РЕЖИМЫ
+// ============================================================
+enum CryptoMode {
+    MODE_BASE64 = 0,
+    MODE_BASE32,
+    MODE_BASE16,
+    MODE_URL,
+    MODE_ROT13,
+    MODE_ROTN,
+    MODE_XOR,
+    MODE_CAESAR,
+    MODE_ATBASH,
+    MODE_MORSE,
+    MODE_BINARY,
+    MODE_ASCII_DEC,
+    MODE_ASCII_HEX,
+    MODE_REVERSE,
+    MODE_COUNT
+};
+
+struct ModeInfo {
+    const wchar_t* name;
+    const wchar_t* icon;
+    const wchar_t* desc;
+    COLORREF color;
+};
+
+const ModeInfo g_modes[] = {
+    { L"Base64",         L"64", L"Стандартный Base64 (RFC 4648)",         RGB(90, 150, 255) },
+    { L"Base32",         L"32", L"Base32 (RFC 4648)",                     RGB(120, 200, 120) },
+    { L"Base16 (Hex)",   L"16", L"Шестнадцатеричный",                     RGB(255, 180, 90) },
+    { L"URL encode",     L"%",  L"URL-кодирование (percent-encoding)",    RGB(200, 140, 255) },
+    { L"ROT13",          L"13", L"Сдвиг на 13 (латиница + кириллица)",    RGB(100, 200, 240) },
+    { L"ROT-N",          L"RN", L"Сдвиг на N (N в поле ключа)",           RGB(100, 200, 240) },
+    { L"XOR",            L"X",  L"XOR с ключом",                          RGB(240, 100, 140) },
+    { L"Caesar",         L"C",  L"Шифр Цезаря (сдвиг в поле ключа)",     RGB(240, 100, 140) },
+    { L"Atbash",         L"A",  L"Атбаш A<->Z, а<->я",                    RGB(160, 200, 100) },
+    { L"Morse",          L"..", L"Азбука Морзе",                          RGB(200, 160, 90) },
+    { L"Binary",         L"01", L"Двоичный код",                          RGB(120, 180, 220) },
+    { L"ASCII dec",      L"d",  L"ASCII коды (десятичные)",               RGB(180, 180, 220) },
+    { L"ASCII hex",      L"h",  L"ASCII коды (hex)",                      RGB(180, 180, 220) },
+    { L"Reverse",        L"R",  L"Реверс строки",                         RGB(200, 100, 200) }
+};
+
+// ============================================================
+// СТРУКТУРЫ
+// ============================================================
+struct HistoryEntry {
+    time_t time;
+    int mode;
+    wstring inputPreview;
+    wstring outputPreview;
+    bool isEncode;
+};
+
+// ============================================================
+// ГЛОБАЛЬНЫЕ
+// ============================================================
+HWND g_hwnd = nullptr;
+HINSTANCE g_hInst = nullptr;
+
+HWND g_hEditInput = nullptr;
+HWND g_hEditOutput = nullptr;
+HWND g_hComboMode = nullptr;
+HWND g_hEditKey = nullptr;
+HWND g_hBtnEncode = nullptr;
+HWND g_hBtnDecode = nullptr;
+HWND g_hBtnClear = nullptr;
+HWND g_hBtnCopyOut = nullptr;
+HWND g_hBtnPaste = nullptr;
+HWND g_hBtnLoad = nullptr;
+HWND g_hBtnSave = nullptr;
+HWND g_hBtnSwap = nullptr;
+HWND g_hBtnOpenDir = nullptr;
+HWND g_hBtnHistoryClr = nullptr;
+HWND g_hHistoryList = nullptr;
+HWND g_hStaticInfo = nullptr;
+HWND g_hTabMain = nullptr;
+
+int g_mode = MODE_BASE64;
+int g_activeTab = 0;    // 0 = Encode, 1 = History, 2 = About
+
+HFONT g_fontSmall = nullptr;
+HFONT g_fontMedium = nullptr;
+HFONT g_fontLarge = nullptr;
+HFONT g_fontMono = nullptr;
+HFONT g_fontMonoBold = nullptr;
+HFONT g_fontBold = nullptr;
+HFONT g_fontIcon = nullptr;
+
+vector<HistoryEntry> g_history;
+
+// Анимация
+float g_animTime = 0;
+DWORD g_lastTick = 0;
+float g_encodeBtnGlow = 0;
+float g_decodeBtnGlow = 0;
+bool g_hoverEncode = false;
+bool g_hoverDecode = false;
+bool g_hoverSwap = false;
+bool g_hoverClear = false;
+bool g_hoverCopy = false;
+bool g_hoverPaste = false;
+bool g_hoverLoad = false;
+bool g_hoverSave = false;
+bool g_hoverOpenDir = false;
+bool g_hoverHistClr = false;
+
+int g_mouseX = 0, g_mouseY = 0;
+
+// ============================================================
+// ПРОТОТИПЫ
+// ============================================================
+LRESULT CALLBACK WindowProc(HWND, UINT, WPARAM, LPARAM);
+void InitApp(HWND);
+void ShutdownApp();
+void SetupFonts();
+void CreateControls(HWND);
+
+void OnEncode();
+void OnDecode();
+void OnClear();
+void OnCopyOutput();
+void OnPaste();
+void OnLoadFile();
+void OnSaveFile();
+void OnSwap();
+void OnOpenDir();
+void OnClearHistory();
+void UpdateInfo();
+void RefreshHistoryList();
+void AddToHistory(int mode, const wstring& input, const wstring& output, bool isEncode);
+
+wstring GetInputText();
+wstring GetOutputText();
+void SetOutputText(const wstring& s);
+wstring GetKey();
+
+wstring Encode(const wstring& input, int mode, const wstring& key);
+wstring Decode(const wstring& input, int mode, const wstring& key);
+
+wstring GetCryptoToolDir();
+void EnsureCryptoToolDir();
+
+void DrawCustomUI(HDC hdc);
+void DrawGradientRect(HDC hdc, RECT rc, COLORREF top, COLORREF bottom);
+void DrawRoundedRect(HDC hdc, RECT rc, int radius, COLORREF fill, COLORREF border);
+void DrawGlowText(HDC hdc, RECT rc, const wstring& text, COLORREF color,
+    COLORREF glow, HFONT font, UINT fmt);
+void DrawModeCard(HDC hdc, RECT rc, const ModeInfo& info, bool active);
+
+// ============================================================
+// ПАПКА
+// ============================================================
+wstring GetCryptoToolDir() {
+    wchar_t path[MAX_PATH] = L"";
+    if (SUCCEEDED(SHGetFolderPathW(nullptr, CSIDL_PERSONAL, nullptr, 0, path))) {
+        wstring dir = path;
+        dir += L"\\CryptoTool";
+        return dir;
+    }
+    return L"C:\\CryptoTool";
+}
+
+void EnsureCryptoToolDir() {
+    CreateDirectoryW(GetCryptoToolDir().c_str(), nullptr);
+}
+
+// ============================================================
+// BASE64
+// ============================================================
+static const wchar_t* B64_CHARS = L"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+
+wstring Base64Encode(const wstring& input) {
+    string utf8;
+    int len = WideCharToMultiByte(CP_UTF8, 0, input.c_str(), (int)input.length(),
+        nullptr, 0, nullptr, nullptr);
+    if (len > 0) {
+        utf8.resize(len);
+        WideCharToMultiByte(CP_UTF8, 0, input.c_str(), (int)input.length(),
+            &utf8[0], len, nullptr, nullptr);
+    }
+    wstring out;
+    int n = (int)utf8.length(), i = 0;
+    while (i < n) {
+        int remain = n - i;
+        unsigned char b0 = (remain > 0) ? (unsigned char)utf8[i] : 0;
+        unsigned char b1 = (remain > 1) ? (unsigned char)utf8[i + 1] : 0;
+        unsigned char b2 = (remain > 2) ? (unsigned char)utf8[i + 2] : 0;
+        out += B64_CHARS[(b0 >> 2) & 0x3F];
+        out += B64_CHARS[((b0 << 4) | (b1 >> 4)) & 0x3F];
+        out += (remain > 1) ? B64_CHARS[((b1 << 2) | (b2 >> 6)) & 0x3F] : L'=';
+        out += (remain > 2) ? B64_CHARS[b2 & 0x3F] : L'=';
+        i += 3;
+    }
+    return out;
+}
+
+wstring Base64Decode(const wstring& input) {
+    wstring clean;
+    for (wchar_t c : input) {
+        if (c == L' ' || c == L'\n' || c == L'\r' || c == L'\t') continue;
+        clean += c;
+    }
+    int table[256];
+    for (int i = 0; i < 256; i++) table[i] = -1;
+    for (int i = 0; i < 64; i++) table[(unsigned char)B64_CHARS[i]] = i;
+    string bytes;
+    int n = (int)clean.length(), i = 0;
+    while (i < n) {
+        int v0 = -1, v1 = -1, v2 = -1, v3 = -1;
+        if (i < n && clean[i] != L'=') v0 = table[(unsigned char)clean[i]]; i++;
+        if (i < n && clean[i] != L'=') v1 = table[(unsigned char)clean[i]]; i++;
+        if (i < n && clean[i] != L'=') v2 = table[(unsigned char)clean[i]]; i++;
+        if (i < n && clean[i] != L'=') v3 = table[(unsigned char)clean[i]]; i++;
+        if (v0 < 0 || v1 < 0) break;
+        bytes += (char)((v0 << 2) | (v1 >> 4));
+        if (v2 >= 0) bytes += (char)(((v1 & 0xF) << 4) | (v2 >> 2));
+        if (v3 >= 0) bytes += (char)(((v2 & 0x3) << 6) | v3);
+    }
+    if (bytes.empty()) return L"";
+    int wlen = MultiByteToWideChar(CP_UTF8, 0, bytes.c_str(), (int)bytes.length(), nullptr, 0);
+    if (wlen <= 0) return L"";
+    wstring out(wlen, L'\0');
+    MultiByteToWideChar(CP_UTF8, 0, bytes.c_str(), (int)bytes.length(), &out[0], wlen);
+    return out;
+}
+
+// ============================================================
+// BASE32
+// ============================================================
+static const wchar_t* B32_CHARS = L"ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
+
+wstring Base32Encode(const wstring& input) {
+    string utf8;
+    int len = WideCharToMultiByte(CP_UTF8, 0, input.c_str(), (int)input.length(),
+        nullptr, 0, nullptr, nullptr);
+    if (len > 0) {
+        utf8.resize(len);
+        WideCharToMultiByte(CP_UTF8, 0, input.c_str(), (int)input.length(),
+            &utf8[0], len, nullptr, nullptr);
+    }
+    wstring out;
+    int n = (int)utf8.length(), i = 0;
+    while (i < n) {
+        int remain = n - i;
+        unsigned char b0 = (remain > 0) ? (unsigned char)utf8[i] : 0;
+        unsigned char b1 = (remain > 1) ? (unsigned char)utf8[i + 1] : 0;
+        unsigned char b2 = (remain > 2) ? (unsigned char)utf8[i + 2] : 0;
+        unsigned char b3 = (remain > 3) ? (unsigned char)utf8[i + 3] : 0;
+        unsigned char b4 = (remain > 4) ? (unsigned char)utf8[i + 4] : 0;
+        out += B32_CHARS[(b0 >> 3) & 0x1F];
+        out += B32_CHARS[((b0 << 2) | (b1 >> 6)) & 0x1F];
+        out += B32_CHARS[(b1 >> 1) & 0x1F];
+        out += B32_CHARS[((b1 << 4) | (b2 >> 4)) & 0x1F];
+        out += B32_CHARS[((b2 << 1) | (b3 >> 7)) & 0x1F];
+        out += B32_CHARS[(b3 >> 2) & 0x1F];
+        out += B32_CHARS[((b3 << 3) | (b4 >> 5)) & 0x1F];
+        out += B32_CHARS[b4 & 0x1F];
+        i += 5;
+    }
+    while (out.length() % 8 != 0) out += L'=';
+    return out;
+}
+
+wstring Base32Decode(const wstring& input) {
+    wstring clean;
+    for (wchar_t c : input) {
+        if (c == L' ' || c == L'\n' || c == L'\r' || c == L'\t' || c == L'=') continue;
+        clean += towupper(c);
+    }
+    int table[256];
+    for (int i = 0; i < 256; i++) table[i] = -1;
+    for (int i = 0; i < 32; i++) table[(unsigned char)B32_CHARS[i]] = i;
+    string bytes;
+    int n = (int)clean.length(), i = 0;
+    while (i + 1 < n) {
+        int vals[8] = { 0 };
+        int valid = 0;
+        for (int k = 0; k < 8; k++) {
+            if (i + k < n) {
+                int v = table[(unsigned char)clean[i + k]];
+                vals[k] = (v < 0) ? 0 : v;
+                valid++;
+            }
+        }
+        i += 8;
+        bytes += (char)((vals[0] << 3) | (vals[1] >> 2));
+        if (valid > 2) bytes += (char)(((vals[1] & 0x3) << 6) | (vals[2] << 1) | (vals[3] >> 4));
+        if (valid > 4) bytes += (char)(((vals[3] & 0xF) << 4) | (vals[4] >> 1));
+        if (valid > 5) bytes += (char)(((vals[4] & 0x1) << 7) | (vals[5] << 2) | (vals[6] >> 3));
+        if (valid > 7) bytes += (char)(((vals[6] & 0x7) << 5) | vals[7]);
+    }
+    if (bytes.empty()) return L"";
+    int wlen = MultiByteToWideChar(CP_UTF8, 0, bytes.c_str(), (int)bytes.length(), nullptr, 0);
+    if (wlen <= 0) return L"";
+    wstring out(wlen, L'\0');
+    MultiByteToWideChar(CP_UTF8, 0, bytes.c_str(), (int)bytes.length(), &out[0], wlen);
+    return out;
+}
+
+// ============================================================
+// BASE16
+// ============================================================
+wstring Base16Encode(const wstring& input) {
+    string utf8;
+    int len = WideCharToMultiByte(CP_UTF8, 0, input.c_str(), (int)input.length(),
+        nullptr, 0, nullptr, nullptr);
+    if (len > 0) {
+        utf8.resize(len);
+        WideCharToMultiByte(CP_UTF8, 0, input.c_str(), (int)input.length(),
+            &utf8[0], len, nullptr, nullptr);
+    }
+    static const wchar_t* hex = L"0123456789ABCDEF";
+    wstring out;
+    for (size_t i = 0; i < utf8.length(); i++) {
+        unsigned char c = (unsigned char)utf8[i];
+        out += hex[(c >> 4) & 0xF];
+        out += hex[c & 0xF];
+        if (i + 1 < utf8.length()) out += L' ';
+    }
+    return out;
+}
+
+wstring Base16Decode(const wstring& input) {
+    wstring clean;
+    for (wchar_t c : input) if (iswxdigit(c)) clean += c;
+    if (clean.length() % 2 != 0) return L"Error: odd hex length";
+    auto hexVal = [](wchar_t c) -> int {
+        if (c >= L'0' && c <= L'9') return c - L'0';
+        if (c >= L'A' && c <= L'F') return c - L'A' + 10;
+        if (c >= L'a' && c <= L'f') return c - L'a' + 10;
+        return 0;
+        };
+    string bytes;
+    for (size_t i = 0; i < clean.length(); i += 2) {
+        bytes += (char)((hexVal(clean[i]) << 4) | hexVal(clean[i + 1]));
+    }
+    if (bytes.empty()) return L"";
+    int wlen = MultiByteToWideChar(CP_UTF8, 0, bytes.c_str(), (int)bytes.length(), nullptr, 0);
+    if (wlen <= 0) return L"";
+    wstring out(wlen, L'\0');
+    MultiByteToWideChar(CP_UTF8, 0, bytes.c_str(), (int)bytes.length(), &out[0], wlen);
+    return out;
+}
+
+// ============================================================
+// URL
+// ============================================================
+static bool IsUrlSafe(wchar_t c) {
+    return (c >= L'a' && c <= L'z') || (c >= L'A' && c <= L'Z') ||
+        (c >= L'0' && c <= L'9') || c == L'-' || c == L'_' || c == L'.' || c == L'~';
+}
+
+wstring UrlEncode(const wstring& input) {
+    string utf8;
+    int len = WideCharToMultiByte(CP_UTF8, 0, input.c_str(), (int)input.length(),
+        nullptr, 0, nullptr, nullptr);
+    if (len > 0) {
+        utf8.resize(len);
+        WideCharToMultiByte(CP_UTF8, 0, input.c_str(), (int)input.length(),
+            &utf8[0], len, nullptr, nullptr);
+    }
+    static const wchar_t* hex = L"0123456789ABCDEF";
+    wstring out;
+    for (unsigned char c : utf8) {
+        if (IsUrlSafe((wchar_t)c)) out += (wchar_t)c;
+        else {
+            out += L'%';
+            out += hex[(c >> 4) & 0xF];
+            out += hex[c & 0xF];
+        }
+    }
+    return out;
+}
+
+wstring UrlDecode(const wstring& input) {
+    auto hexVal = [](wchar_t c) -> int {
+        if (c >= L'0' && c <= L'9') return c - L'0';
+        if (c >= L'A' && c <= L'F') return c - L'A' + 10;
+        if (c >= L'a' && c <= L'f') return c - L'a' + 10;
+        return 0;
+        };
+    string bytes;
+    for (size_t i = 0; i < input.length(); i++) {
+        if (input[i] == L'%' && i + 2 < input.length()) {
+            bytes += (char)((hexVal(input[i + 1]) << 4) | hexVal(input[i + 2]));
+            i += 2;
+        }
+        else if (input[i] == L'+') bytes += ' ';
+        else bytes += (char)input[i];
+    }
+    if (bytes.empty()) return L"";
+    int wlen = MultiByteToWideChar(CP_UTF8, 0, bytes.c_str(), (int)bytes.length(), nullptr, 0);
+    if (wlen <= 0) return L"";
+    wstring out(wlen, L'\0');
+    MultiByteToWideChar(CP_UTF8, 0, bytes.c_str(), (int)bytes.length(), &out[0], wlen);
+    return out;
+}
+
+// ============================================================
+// ROT
+// ============================================================
+wstring RotN(const wstring& input, int n) {
+    n = ((n % 26) + 26) % 26;
+    wstring out = input;
+    for (auto& c : out) {
+        if (c >= L'a' && c <= L'z') c = (wchar_t)(L'a' + (c - L'a' + n) % 26);
+        else if (c >= L'A' && c <= L'Z') c = (wchar_t)(L'A' + (c - L'A' + n) % 26);
+        else if (c >= L'а' && c <= L'я') c = (wchar_t)(L'а' + (c - L'а' + n) % 32);
+        else if (c >= L'А' && c <= L'Я') c = (wchar_t)(L'А' + (c - L'А' + n) % 32);
+    }
+    return out;
+}
+
+// ============================================================
+// XOR
+// ============================================================
+wstring XorCipher(const wstring& input, const wstring& key) {
+    if (key.empty()) return L"Error: empty key";
+    string utf8, keyU8;
+    int len = WideCharToMultiByte(CP_UTF8, 0, input.c_str(), (int)input.length(),
+        nullptr, 0, nullptr, nullptr);
+    if (len > 0) {
+        utf8.resize(len);
+        WideCharToMultiByte(CP_UTF8, 0, input.c_str(), (int)input.length(),
+            &utf8[0], len, nullptr, nullptr);
+    }
+    len = WideCharToMultiByte(CP_UTF8, 0, key.c_str(), (int)key.length(),
+        nullptr, 0, nullptr, nullptr);
+    if (len > 0) {
+        keyU8.resize(len);
+        WideCharToMultiByte(CP_UTF8, 0, key.c_str(), (int)key.length(),
+            &keyU8[0], len, nullptr, nullptr);
+    }
+    if (keyU8.empty()) return L"Error: empty key";
+    string out(utf8.length(), 0);
+    for (size_t i = 0; i < utf8.length(); i++)
+        out[i] = (char)((unsigned char)utf8[i] ^ (unsigned char)keyU8[i % keyU8.length()]);
+    if (out.empty()) return L"";
+    int wlen = MultiByteToWideChar(CP_UTF8, 0, out.c_str(), (int)out.length(), nullptr, 0);
+    if (wlen <= 0) {
+        static const wchar_t* hex = L"0123456789ABCDEF";
+        wstring hexOut;
+        for (unsigned char c : out) {
+            hexOut += hex[(c >> 4) & 0xF];
+            hexOut += hex[c & 0xF];
+            hexOut += L' ';
+        }
+        return hexOut;
+    }
+    wstring wout(wlen, L'\0');
+    MultiByteToWideChar(CP_UTF8, 0, out.c_str(), (int)out.length(), &wout[0], wlen);
+    return wout;
+}
+
+// ============================================================
+// ATBASH
+// ============================================================
+wstring Atbash(const wstring& input) {
+    wstring out = input;
+    for (auto& c : out) {
+        if (c >= L'a' && c <= L'z') c = (wchar_t)(L'z' - (c - L'a'));
+        else if (c >= L'A' && c <= L'Z') c = (wchar_t)(L'Z' - (c - L'A'));
+        else if (c >= L'а' && c <= L'я') c = (wchar_t)(L'я' - (c - L'а'));
+        else if (c >= L'А' && c <= L'Я') c = (wchar_t)(L'Я' - (c - L'А'));
+    }
+    return out;
+}
+
+// ============================================================
+// MORSE
+// ============================================================
+static const wchar_t* MORSE_EN[26] = {
+    L".-", L"-...", L"-.-.", L"-..", L".", L"..-.", L"--.",
+    L"....", L"..", L".---", L"-.-", L".-..", L"--", L"-.",
+    L"---", L".--.", L"--.-", L".-.", L"...", L"-", L"..-",
+    L"...-", L".--", L"-..-", L"-.--", L"--.."
+};
+
+static const wchar_t* MORSE_RU[32] = {
+    L".-", L"-...", L".--", L"--.", L"-..", L".", L"...-",
+    L"--..", L"..", L".---", L"-.-", L".-..", L"--", L"-.",
+    L"---", L".--.", L".-.", L"...", L"-", L"..-", L"..-.",
+    L"....", L"-.-.", L"---.", L"----", L"--.-", L"--.--", L"-.--",
+    L"-..-", L"..-..", L"..--", L".-.-"
+};
+
+wstring MorseEncode(const wstring& input) {
+    wstring out;
+    for (wchar_t c : input) {
+        if (c == L' ') { out += L"/ "; continue; }
+        if (c >= L'a' && c <= L'z') { out += MORSE_EN[c - L'a']; out += L' '; }
+        else if (c >= L'A' && c <= L'Z') { out += MORSE_EN[c - L'A']; out += L' '; }
+        else if (c >= L'а' && c <= L'я') { out += MORSE_RU[c - L'а']; out += L' '; }
+        else if (c >= L'А' && c <= L'Я') { out += MORSE_RU[c - L'А']; out += L' '; }
+        else if (c >= L'0' && c <= L'9') {
+            static const wchar_t* digits[10] = {
+                L"-----", L".----", L"..---", L"...--", L"....-",
+                L".....", L"-....", L"--...", L"---..", L"----."
+            };
+            out += digits[c - L'0'];
+            out += L' ';
+        }
+        else { out += c; out += L' '; }
+    }
+    return out;
+}
+
+wstring MorseDecode(const wstring& input) {
+    wstring out, cur;
+    auto findMorse = [](const wstring& code) -> wchar_t {
+        for (int i = 0; i < 26; i++) if (code == MORSE_EN[i]) return (wchar_t)(L'A' + i);
+        for (int i = 0; i < 32; i++) if (code == MORSE_RU[i]) return (wchar_t)(L'А' + i);
+        static const wchar_t* digits[10] = {
+            L"-----", L".----", L"..---", L"...--", L"....-",
+            L".....", L"-....", L"--...", L"---..", L"----."
+        };
+        for (int i = 0; i < 10; i++) if (code == digits[i]) return (wchar_t)(L'0' + i);
+        return 0;
+        };
+    for (size_t i = 0; i <= input.length(); i++) {
+        wchar_t c = (i < input.length()) ? input[i] : L' ';
+        if (c == L' ' || c == L'\t' || c == L'\n' || c == L'\r') {
+            if (!cur.empty()) {
+                wchar_t d = findMorse(cur);
+                out += (d != 0) ? d : L'?';
+                cur.clear();
+            }
+        }
+        else if (c == L'/') out += L' ';
+        else if (c == L'.' || c == L'-') cur += c;
+    }
+    return out;
+}
+
+// ============================================================
+// BINARY
+// ============================================================
+wstring BinaryEncode(const wstring& input) {
+    string utf8;
+    int len = WideCharToMultiByte(CP_UTF8, 0, input.c_str(), (int)input.length(),
+        nullptr, 0, nullptr, nullptr);
+    if (len > 0) {
+        utf8.resize(len);
+        WideCharToMultiByte(CP_UTF8, 0, input.c_str(), (int)input.length(),
+            &utf8[0], len, nullptr, nullptr);
+    }
+    wstring out;
+    for (size_t i = 0; i < utf8.length(); i++) {
+        unsigned char c = (unsigned char)utf8[i];
+        for (int b = 7; b >= 0; b--) out += ((c >> b) & 1) ? L'1' : L'0';
+        if (i + 1 < utf8.length()) out += L' ';
+    }
+    return out;
+}
+
+wstring BinaryDecode(const wstring& input) {
+    wstring clean;
+    for (wchar_t c : input) if (c == L'0' || c == L'1') clean += c;
+    if (clean.length() % 8 != 0) return L"Error: length must be multiple of 8";
+    string bytes;
+    for (size_t i = 0; i < clean.length(); i += 8) {
+        unsigned char b = 0;
+        for (int j = 0; j < 8; j++) b = (unsigned char)((b << 1) | (clean[i + j] == L'1' ? 1 : 0));
+        bytes += (char)b;
+    }
+    if (bytes.empty()) return L"";
+    int wlen = MultiByteToWideChar(CP_UTF8, 0, bytes.c_str(), (int)bytes.length(), nullptr, 0);
+    if (wlen <= 0) return L"Error UTF-8";
+    wstring out(wlen, L'\0');
+    MultiByteToWideChar(CP_UTF8, 0, bytes.c_str(), (int)bytes.length(), &out[0], wlen);
+    return out;
+}
+
+// ============================================================
+// ASCII
+// ============================================================
+wstring AsciiEncode(const wstring& input, bool hex) {
+    string utf8;
+    int len = WideCharToMultiByte(CP_UTF8, 0, input.c_str(), (int)input.length(),
+        nullptr, 0, nullptr, nullptr);
+    if (len > 0) {
+        utf8.resize(len);
+        WideCharToMultiByte(CP_UTF8, 0, input.c_str(), (int)input.length(),
+            &utf8[0], len, nullptr, nullptr);
+    }
+    wstring out;
+    for (size_t i = 0; i < utf8.length(); i++) {
+        unsigned char c = (unsigned char)utf8[i];
+        wchar_t buf[16];
+        if (hex) swprintf(buf, 16, L"%02X", c);
+        else swprintf(buf, 16, L"%d", c);
+        out += buf;
+        if (i + 1 < utf8.length()) out += L' ';
+    }
+    return out;
+}
+
+wstring AsciiDecode(const wstring& input, bool hex) {
+    wstringstream ss(input);
+    string bytes;
+    wstring token;
+    while (ss >> token) {
+        int val = hex ? (int)wcstol(token.c_str(), nullptr, 16) : _wtoi(token.c_str());
+        if (val >= 0 && val <= 255) bytes += (char)val;
+    }
+    if (bytes.empty()) return L"";
+    int wlen = MultiByteToWideChar(CP_UTF8, 0, bytes.c_str(), (int)bytes.length(), nullptr, 0);
+    if (wlen <= 0) return L"Error UTF-8";
+    wstring out(wlen, L'\0');
+    MultiByteToWideChar(CP_UTF8, 0, bytes.c_str(), (int)bytes.length(), &out[0], wlen);
+    return out;
+}
+
+// ============================================================
+// REVERSE
+// ============================================================
+wstring ReverseString(const wstring& input) {
+    wstring out = input;
+    reverse(out.begin(), out.end());
+    return out;
+}
+
+// ============================================================
+// ENCODE / DECODE
+// ============================================================
+wstring Encode(const wstring& input, int mode, const wstring& key) {
+    switch (mode) {
+    case MODE_BASE64:    return Base64Encode(input);
+    case MODE_BASE32:    return Base32Encode(input);
+    case MODE_BASE16:    return Base16Encode(input);
+    case MODE_URL:       return UrlEncode(input);
+    case MODE_ROT13:     return RotN(input, 13);
+    case MODE_ROTN:      return RotN(input, _wtoi(key.c_str()));
+    case MODE_XOR:       return XorCipher(input, key);
+    case MODE_CAESAR:    return RotN(input, _wtoi(key.c_str()));
+    case MODE_ATBASH:    return Atbash(input);
+    case MODE_MORSE:     return MorseEncode(input);
+    case MODE_BINARY:    return BinaryEncode(input);
+    case MODE_ASCII_DEC: return AsciiEncode(input, false);
+    case MODE_ASCII_HEX: return AsciiEncode(input, true);
+    case MODE_REVERSE:   return ReverseString(input);
+    }
+    return L"";
+}
+
+wstring Decode(const wstring& input, int mode, const wstring& key) {
+    switch (mode) {
+    case MODE_BASE64:    return Base64Decode(input);
+    case MODE_BASE32:    return Base32Decode(input);
+    case MODE_BASE16:    return Base16Decode(input);
+    case MODE_URL:       return UrlDecode(input);
+    case MODE_ROT13:     return RotN(input, 13);
+    case MODE_ROTN:      return RotN(input, -_wtoi(key.c_str()));
+    case MODE_XOR:       return XorCipher(input, key);
+    case MODE_CAESAR:    return RotN(input, -_wtoi(key.c_str()));
+    case MODE_ATBASH:    return Atbash(input);
+    case MODE_MORSE:     return MorseDecode(input);
+    case MODE_BINARY:    return BinaryDecode(input);
+    case MODE_ASCII_DEC: return AsciiDecode(input, false);
+    case MODE_ASCII_HEX: return AsciiDecode(input, true);
+    case MODE_REVERSE:   return ReverseString(input);
+    }
+    return L"";
+}
+
+// ============================================================
+// UI УТИЛИТЫ
+// ============================================================
+wstring GetInputText() {
+    int len = GetWindowTextLengthW(g_hEditInput);
+    if (len <= 0) return L"";
+    wstring buf(len + 1, L'\0');
+    GetWindowTextW(g_hEditInput, &buf[0], len + 1);
+    buf.resize(len);
+    return buf;
+}
+
+wstring GetOutputText() {
+    int len = GetWindowTextLengthW(g_hEditOutput);
+    if (len <= 0) return L"";
+    wstring buf(len + 1, L'\0');
+    GetWindowTextW(g_hEditOutput, &buf[0], len + 1);
+    buf.resize(len);
+    return buf;
+}
+
+void SetOutputText(const wstring& s) {
+    SetWindowTextW(g_hEditOutput, s.c_str());
+}
+
+wstring GetKey() {
+    int len = GetWindowTextLengthW(g_hEditKey);
+    if (len <= 0) return L"";
+    wstring buf(len + 1, L'\0');
+    GetWindowTextW(g_hEditKey, &buf[0], len + 1);
+    buf.resize(len);
+    return buf;
+}
+
+// ============================================================
+// ГРАФИЧЕСКИЕ УТИЛИТЫ
+// ============================================================
+void DrawGradientRect(HDC hdc, RECT rc, COLORREF top, COLORREF bottom) {
+    int h = rc.bottom - rc.top;
+    if (h <= 0) return;
+    for (int y = 0; y < h; y++) {
+        float t = (float)y / h;
+        int r = (int)(GetRValue(top) + (GetRValue(bottom) - GetRValue(top)) * t);
+        int g = (int)(GetGValue(top) + (GetGValue(bottom) - GetGValue(top)) * t);
+        int b = (int)(GetBValue(top) + (GetBValue(bottom) - GetBValue(top)) * t);
+        RECT line = { rc.left, rc.top + y, rc.right, rc.top + y + 1 };
+        HBRUSH br = CreateSolidBrush(RGB(r, g, b));
+        FillRect(hdc, &line, br);
+        DeleteObject(br);
+    }
+}
+
+void DrawRoundedRect(HDC hdc, RECT rc, int radius, COLORREF fill, COLORREF border) {
+    HBRUSH br = CreateSolidBrush(fill);
+    HPEN pen = CreatePen(PS_SOLID, 1, border);
+    HGDIOBJ ob = SelectObject(hdc, br);
+    HGDIOBJ op = SelectObject(hdc, pen);
+    RoundRect(hdc, rc.left, rc.top, rc.right, rc.bottom, radius, radius);
+    SelectObject(hdc, ob);
+    SelectObject(hdc, op);
+    DeleteObject(br);
+    DeleteObject(pen);
+}
+
+void DrawGlowText(HDC hdc, RECT rc, const wstring& text, COLORREF color,
+    COLORREF glow, HFONT font, UINT fmt) {
+    SetBkMode(hdc, TRANSPARENT);
+    HGDIOBJ oldFont = SelectObject(hdc, font);
+
+    // Свечение — несколько смещённых копий
+    SetTextColor(hdc, glow);
+    RECT r;
+    r = rc; r.left -= 1; r.top -= 1;
+    DrawTextW(hdc, text.c_str(), -1, &r, fmt);
+    r = rc; r.left += 1; r.top -= 1;
+    DrawTextW(hdc, text.c_str(), -1, &r, fmt);
+    r = rc; r.left -= 1; r.top += 1;
+    DrawTextW(hdc, text.c_str(), -1, &r, fmt);
+    r = rc; r.left += 1; r.top += 1;
+    DrawTextW(hdc, text.c_str(), -1, &r, fmt);
+
+    // Основной текст
+    SetTextColor(hdc, color);
+    DrawTextW(hdc, text.c_str(), -1, &rc, fmt);
+
+    SelectObject(hdc, oldFont);
+}
+
+// ============================================================
+// СОБЫТИЯ
+// ============================================================
+void AddToHistory(int mode, const wstring& input, const wstring& output, bool isEncode) {
+    HistoryEntry e;
+    e.time = time(nullptr);
+    e.mode = mode;
+
+    wstring in = input;
+    wstring out = output;
+    if (in.length() > 40) in = in.substr(0, 37) + L"...";
+    if (out.length() > 40) out = out.substr(0, 37) + L"...";
+    e.inputPreview = in;
+    e.outputPreview = out;
+    e.isEncode = isEncode;
+
+    g_history.insert(g_history.begin(), e);
+    if (g_history.size() > 100) g_history.pop_back();
+
+    RefreshHistoryList();
+}
+
+void OnEncode() {
+    wstring input = GetInputText();
+    if (input.empty()) { SetOutputText(L""); UpdateInfo(); return; }
+    wstring result = Encode(input, g_mode, GetKey());
+    SetOutputText(result);
+    AddToHistory(g_mode, input, result, true);
+    UpdateInfo();
+    g_encodeBtnGlow = 1.0f;
+}
+
+void OnDecode() {
+    wstring input = GetInputText();
+    if (input.empty()) { SetOutputText(L""); UpdateInfo(); return; }
+    wstring result = Decode(input, g_mode, GetKey());
+    SetOutputText(result);
+    AddToHistory(g_mode, input, result, false);
+    UpdateInfo();
+    g_decodeBtnGlow = 1.0f;
+}
+
+void OnClear() {
+    SetWindowTextW(g_hEditInput, L"");
+    SetWindowTextW(g_hEditOutput, L"");
+    SetWindowTextW(g_hEditKey, L"");
+    UpdateInfo();
+}
+
+void OnCopyOutput() {
+    wstring text = GetOutputText();
+    if (text.empty()) text = GetInputText();
+    if (text.empty()) return;
+    if (OpenClipboard(g_hwnd)) {
+        EmptyClipboard();
+        size_t len = (text.length() + 1) * sizeof(wchar_t);
+        HGLOBAL hMem = GlobalAlloc(GMEM_MOVEABLE, len);
+        if (hMem) {
+            wchar_t* ptr = (wchar_t*)GlobalLock(hMem);
+            if (ptr) {
+                wcscpy_s(ptr, text.length() + 1, text.c_str());
+                GlobalUnlock(hMem);
+                SetClipboardData(CF_UNICODETEXT, hMem);
+            }
+        }
+        CloseClipboard();
+    }
+}
+
+void OnPaste() {
+    if (OpenClipboard(g_hwnd)) {
+        HANDLE hData = GetClipboardData(CF_UNICODETEXT);
+        if (hData) {
+            wchar_t* ptr = (wchar_t*)GlobalLock(hData);
+            if (ptr) {
+                SetWindowTextW(g_hEditInput, ptr);
+                GlobalUnlock(hData);
+            }
+        }
+        CloseClipboard();
+        UpdateInfo();
+    }
+}
+
+void OnLoadFile() {
+    EnsureCryptoToolDir();
+    wstring path = GetCryptoToolDir() + L"\\input.txt";
+
+    if (GetFileAttributesW(path.c_str()) == INVALID_FILE_ATTRIBUTES) {
+        wstring msg = L"Файл не найден:\n" + path;
+        MessageBoxW(g_hwnd, msg.c_str(), L"Ошибка", MB_OK | MB_ICONWARNING);
+        return;
+    }
+
+    HANDLE hFile = CreateFileW(path.c_str(), GENERIC_READ, FILE_SHARE_READ,
+        nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+    if (hFile == INVALID_HANDLE_VALUE) {
+        MessageBoxW(g_hwnd, L"Не удалось открыть файл", L"Ошибка", MB_OK | MB_ICONERROR);
+        return;
+    }
+
+    DWORD size = GetFileSize(hFile, nullptr);
+    if (size == 0 || size > 10 * 1024 * 1024) {
+        CloseHandle(hFile);
+        MessageBoxW(g_hwnd, L"Файл пустой или слишком большой", L"Ошибка", MB_OK);
+        return;
+    }
+
+    vector<char> buf(size + 1);
+    DWORD read = 0;
+    ReadFile(hFile, &buf[0], size, &read, nullptr);
+    buf[read] = 0;
+    CloseHandle(hFile);
+
+    const char* data = &buf[0];
+    int dataLen = (int)read;
+    if (dataLen >= 3 && (unsigned char)data[0] == 0xEF &&
+        (unsigned char)data[1] == 0xBB && (unsigned char)data[2] == 0xBF) {
+        data += 3;
+        dataLen -= 3;
+    }
+
+    int wlen = MultiByteToWideChar(CP_UTF8, 0, data, dataLen, nullptr, 0);
+    if (wlen > 0) {
+        wstring wbuf(wlen, L'\0');
+        MultiByteToWideChar(CP_UTF8, 0, data, dataLen, &wbuf[0], wlen);
+        SetWindowTextW(g_hEditInput, wbuf.c_str());
+    }
+    UpdateInfo();
+}
+
+void OnSaveFile() {
+    EnsureCryptoToolDir();
+    wstring path = GetCryptoToolDir() + L"\\output.txt";
+
+    wstring text = GetOutputText();
+    if (text.empty()) text = GetInputText();
+
+    string utf8;
+    int len = WideCharToMultiByte(CP_UTF8, 0, text.c_str(), (int)text.length(),
+        nullptr, 0, nullptr, nullptr);
+    if (len > 0) {
+        utf8.resize(len);
+        WideCharToMultiByte(CP_UTF8, 0, text.c_str(), (int)text.length(),
+            &utf8[0], len, nullptr, nullptr);
+    }
+
+    HANDLE hFile = CreateFileW(path.c_str(), GENERIC_WRITE, 0, nullptr,
+        CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
+    if (hFile == INVALID_HANDLE_VALUE) {
+        MessageBoxW(g_hwnd, L"Не удалось создать файл", L"Ошибка", MB_OK | MB_ICONERROR);
+        return;
+    }
+
+    const unsigned char bom[3] = { 0xEF, 0xBB, 0xBF };
+    DWORD written = 0;
+    WriteFile(hFile, bom, 3, &written, nullptr);
+    if (!utf8.empty()) {
+        WriteFile(hFile, utf8.c_str(), (DWORD)utf8.length(), &written, nullptr);
+    }
+    CloseHandle(hFile);
+
+    wstring msg = L"Файл сохранён:\n" + path;
+    MessageBoxW(g_hwnd, msg.c_str(), L"Готово", MB_OK | MB_ICONINFORMATION);
+}
+
+void OnSwap() {
+    wstring in = GetInputText();
+    wstring out = GetOutputText();
+    SetWindowTextW(g_hEditInput, out.c_str());
+    SetWindowTextW(g_hEditOutput, in.c_str());
+    UpdateInfo();
+}
+
+void OnOpenDir() {
+    EnsureCryptoToolDir();
+    wstring dir = GetCryptoToolDir();
+    ShellExecuteW(nullptr, L"open", dir.c_str(), nullptr, nullptr, SW_SHOW);
+}
+
+void OnClearHistory() {
+    g_history.clear();
+    RefreshHistoryList();
+}
+
+void RefreshHistoryList() {
+    if (!g_hHistoryList) return;
+    SendMessageW(g_hHistoryList, LB_RESETCONTENT, 0, 0);
+
+    for (size_t i = 0; i < g_history.size(); i++) {
+        const auto& e = g_history[i];
+        tm ti;
+        localtime_s(&ti, &e.time);
+
+        wchar_t buf[256];
+        swprintf(buf, 256, L"%s  %s  %02d:%02d:%02d  %s",
+            e.isEncode ? L"EN" : L"DE",
+            g_modes[e.mode].name,
+            ti.tm_hour, ti.tm_min, ti.tm_sec,
+            e.inputPreview.c_str());
+
+        SendMessageW(g_hHistoryList, LB_ADDSTRING, 0, (LPARAM)buf);
+    }
+}
+
+void UpdateInfo() {
+    int inLen = GetWindowTextLengthW(g_hEditInput);
+    int outLen = GetWindowTextLengthW(g_hEditOutput);
+
+    wstringstream ss;
+    ss << L"  Режим: " << g_modes[g_mode].name
+        << L"   |   Вход: " << inLen << L" симв."
+        << L"   |   Выход: " << outLen << L" симв."
+        << L"   |   История: " << g_history.size();
+
+    SetWindowTextW(g_hStaticInfo, ss.str().c_str());
+}
+// ============================================================
+// CRYPTO TOOL ULTIMATE — Часть 2/2: кастомный UI, WindowProc
+// ============================================================
+
+// ============================================================
+// СОЗДАНИЕ КОНТРОЛОВ
+// ============================================================
+void SetupFonts() {
+    g_fontSmall = CreateFontW(14, 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE,
+        DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
+        CLEARTYPE_QUALITY, DEFAULT_PITCH, L"Segoe UI");
+    g_fontMedium = CreateFontW(17, 0, 0, 0, FW_SEMIBOLD, FALSE, FALSE, FALSE,
+        DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
+        CLEARTYPE_QUALITY, DEFAULT_PITCH, L"Segoe UI");
+    g_fontLarge = CreateFontW(26, 0, 0, 0, FW_BOLD, FALSE, FALSE, FALSE,
+        DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
+        CLEARTYPE_QUALITY, DEFAULT_PITCH, L"Segoe UI");
+    g_fontMono = CreateFontW(14, 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE,
+        DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
+        CLEARTYPE_QUALITY, DEFAULT_PITCH, L"Consolas");
+    g_fontMonoBold = CreateFontW(14, 0, 0, 0, FW_BOLD, FALSE, FALSE, FALSE,
+        DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
+        CLEARTYPE_QUALITY, DEFAULT_PITCH, L"Consolas");
+    g_fontBold = CreateFontW(16, 0, 0, 0, FW_BOLD, FALSE, FALSE, FALSE,
+        DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
+        CLEARTYPE_QUALITY, DEFAULT_PITCH, L"Segoe UI");
+    g_fontIcon = CreateFontW(20, 0, 0, 0, FW_BOLD, FALSE, FALSE, FALSE,
+        DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
+        CLEARTYPE_QUALITY, DEFAULT_PITCH, L"Segoe UI Symbol");
+}
+
+#define HMENU_FROM_ID(id) ((HMENU)(INT_PTR)(id))
+
+void CreateControls(HWND hwnd) {
+    // Combo режима
+    g_hComboMode = CreateWindowExW(0, L"COMBOBOX", L"",
+        WS_CHILD | WS_VISIBLE | CBS_DROPDOWNLIST | WS_VSCROLL,
+        20, 60, 320, 400,
+        hwnd, HMENU_FROM_ID(IDC_COMBO_MODE), g_hInst, nullptr);
+
+    for (int i = 0; i < MODE_COUNT; i++)
+        SendMessageW(g_hComboMode, CB_ADDSTRING, 0, (LPARAM)g_modes[i].name);
+    SendMessageW(g_hComboMode, CB_SETCURSEL, 0, 0);
+
+    // Ключ
+    g_hEditKey = CreateWindowExW(0, L"EDIT", L"",
+        WS_CHILD | WS_VISIBLE | ES_AUTOHSCROLL,
+        360, 62, 200, 28,
+        hwnd, HMENU_FROM_ID(IDC_EDIT_KEY), g_hInst, nullptr);
+
+    // Encode
+    g_hBtnEncode = CreateWindowExW(0, L"BUTTON", L"",
+        WS_CHILD | WS_VISIBLE | BS_OWNERDRAW,
+        580, 60, 150, 32,
+        hwnd, HMENU_FROM_ID(IDC_BTN_ENCODE), g_hInst, nullptr);
+
+    // Decode
+    g_hBtnDecode = CreateWindowExW(0, L"BUTTON", L"",
+        WS_CHILD | WS_VISIBLE | BS_OWNERDRAW,
+        740, 60, 150, 32,
+        hwnd, HMENU_FROM_ID(IDC_BTN_DECODE), g_hInst, nullptr);
+
+    // Clear
+    g_hBtnClear = CreateWindowExW(0, L"BUTTON", L"",
+        WS_CHILD | WS_VISIBLE | BS_OWNERDRAW,
+        900, 60, 130, 32,
+        hwnd, HMENU_FROM_ID(IDC_BTN_CLEAR), g_hInst, nullptr);
+
+    // Paste
+    g_hBtnPaste = CreateWindowExW(0, L"BUTTON", L"",
+        WS_CHILD | WS_VISIBLE | BS_OWNERDRAW,
+        1040, 60, 150, 32,
+        hwnd, HMENU_FROM_ID(IDC_BTN_PASTE), g_hInst, nullptr);
+
+    // Входной EDIT
+    g_hEditInput = CreateWindowExW(0, L"EDIT", L"",
+        WS_CHILD | WS_VISIBLE | ES_MULTILINE | ES_AUTOVSCROLL | WS_VSCROLL | ES_WANTRETURN,
+        20, 130, 660, 350,
+        hwnd, HMENU_FROM_ID(IDC_EDIT_INPUT), g_hInst, nullptr);
+
+    // Выходной EDIT
+    g_hEditOutput = CreateWindowExW(0, L"EDIT", L"",
+        WS_CHILD | WS_VISIBLE | ES_MULTILINE | ES_AUTOVSCROLL | WS_VSCROLL | ES_READONLY,
+        720, 130, 660, 350,
+        hwnd, HMENU_FROM_ID(IDC_EDIT_OUTPUT), g_hInst, nullptr);
+
+    // Swap
+    g_hBtnSwap = CreateWindowExW(0, L"BUTTON", L"",
+        WS_CHILD | WS_VISIBLE | BS_OWNERDRAW,
+        20, 500, 130, 34,
+        hwnd, HMENU_FROM_ID(IDC_BTN_SWAP), g_hInst, nullptr);
+
+    // Load
+    g_hBtnLoad = CreateWindowExW(0, L"BUTTON", L"",
+        WS_CHILD | WS_VISIBLE | BS_OWNERDRAW,
+        160, 500, 180, 34,
+        hwnd, HMENU_FROM_ID(IDC_BTN_LOAD), g_hInst, nullptr);
+
+    // Save
+    g_hBtnSave = CreateWindowExW(0, L"BUTTON", L"",
+        WS_CHILD | WS_VISIBLE | BS_OWNERDRAW,
+        350, 500, 200, 34,
+        hwnd, HMENU_FROM_ID(IDC_BTN_SAVE), g_hInst, nullptr);
+
+    // Open dir
+    g_hBtnOpenDir = CreateWindowExW(0, L"BUTTON", L"",
+        WS_CHILD | WS_VISIBLE | BS_OWNERDRAW,
+        560, 500, 170, 34,
+        hwnd, HMENU_FROM_ID(IDC_BTN_OPEN_DIR), g_hInst, nullptr);
+
+    // Copy
+    g_hBtnCopyOut = CreateWindowExW(0, L"BUTTON", L"",
+        WS_CHILD | WS_VISIBLE | BS_OWNERDRAW,
+        1200, 500, 180, 34,
+        hwnd, HMENU_FROM_ID(IDC_BTN_COPY_OUT), g_hInst, nullptr);
+
+    // История
+    g_hHistoryList = CreateWindowExW(0, L"LISTBOX", L"",
+        WS_CHILD | WS_VISIBLE | WS_BORDER | LBS_NOTIFY | WS_VSCROLL | LBS_OWNERDRAWFIXED | LBS_HASSTRINGS,
+        20, 560, 1360, 260,
+        hwnd, HMENU_FROM_ID(IDC_HISTORY_LIST), g_hInst, nullptr);
+
+    // История очистить
+    g_hBtnHistoryClr = CreateWindowExW(0, L"BUTTON", L"",
+        WS_CHILD | WS_VISIBLE | BS_OWNERDRAW,
+        20, 830, 180, 30,
+        hwnd, HMENU_FROM_ID(IDC_BTN_HISTORY_CLR), g_hInst, nullptr);
+
+    // Статус
+    g_hStaticInfo = CreateWindowExW(0, L"STATIC", L"",
+        WS_CHILD | WS_VISIBLE | SS_LEFT,
+        220, 835, 1160, 24,
+        hwnd, HMENU_FROM_ID(IDC_STATIC_INFO), g_hInst, nullptr);
+
+    // Шрифты
+    SendMessageW(g_hComboMode, WM_SETFONT, (WPARAM)g_fontSmall, TRUE);
+    SendMessageW(g_hEditKey, WM_SETFONT, (WPARAM)g_fontSmall, TRUE);
+    SendMessageW(g_hEditInput, WM_SETFONT, (WPARAM)g_fontMono, TRUE);
+    SendMessageW(g_hEditOutput, WM_SETFONT, (WPARAM)g_fontMono, TRUE);
+    SendMessageW(g_hHistoryList, WM_SETFONT, (WPARAM)g_fontMono, TRUE);
+    SendMessageW(g_hStaticInfo, WM_SETFONT, (WPARAM)g_fontSmall, TRUE);
+
+    UpdateInfo();
+}
+
+// ============================================================
+// ОТРИСОВКА КНОПОК
+// ============================================================
+struct ButtonStyle {
+    COLORREF fill1, fill2;
+    COLORREF border;
+    COLORREF text;
+    const wchar_t* label;
+    int iconSize;
+    bool* hoverFlag;
+    float* glowPtr;
+    COLORREF glowColor;
+};
+
+void DrawStyledButton(HDC hdc, RECT rc, const ButtonStyle& style) {
+    bool hover = style.hoverFlag ? *style.hoverFlag : false;
+    float glow = style.glowPtr ? *style.glowPtr : 0.0f;
+
+    // Тень
+    RECT shadowRc = rc;
+    shadowRc.left += 2;
+    shadowRc.top += 2;
+    DrawRoundedRect(hdc, shadowRc, 10, RGB(8, 10, 16), RGB(8, 10, 16));
+
+    // Свечение
+    if (glow > 0.01f) {
+        int expand = (int)(glow * 12);
+        RECT glowRc = rc;
+        glowRc.left -= expand;
+        glowRc.top -= expand;
+        glowRc.right += expand;
+        glowRc.bottom += expand;
+        DrawRoundedRect(hdc, glowRc, 14, style.glowColor, style.glowColor);
+    }
+
+    // Фон градиент
+    COLORREF fill1 = style.fill1;
+    COLORREF fill2 = style.fill2;
+    if (hover) {
+        fill1 = RGB(
+            min(255, (int)GetRValue(fill1) + 30),
+            min(255, (int)GetGValue(fill1) + 30),
+            min(255, (int)GetBValue(fill1) + 30));
+        fill2 = RGB(
+            min(255, (int)GetRValue(fill2) + 30),
+            min(255, (int)GetGValue(fill2) + 30),
+            min(255, (int)GetBValue(fill2) + 30));
+    }
+
+    DrawGradientRect(hdc, rc, fill1, fill2);
+
+    // Верхняя светлая полоса
+    RECT topRc = { rc.left + 2, rc.top + 2, rc.right - 2, rc.top + 3 };
+    HBRUSH lightBr = CreateSolidBrush(RGB(
+        min(255, (int)GetRValue(fill1) + 60),
+        min(255, (int)GetGValue(fill1) + 60),
+        min(255, (int)GetBValue(fill1) + 60)));
+    FillRect(hdc, &topRc, lightBr);
+    DeleteObject(lightBr);
+
+    // Рамка
+    HBRUSH ob = (HBRUSH)SelectObject(hdc, GetStockObject(NULL_BRUSH));
+    HPEN pen = CreatePen(PS_SOLID, 1, style.border);
+    HGDIOBJ op = SelectObject(hdc, pen);
+    RoundRect(hdc, rc.left, rc.top, rc.right, rc.bottom, 10, 10);
+    SelectObject(hdc, ob);
+    SelectObject(hdc, op);
+    DeleteObject(pen);
+
+    // Текст
+    SetBkMode(hdc, TRANSPARENT);
+    SetTextColor(hdc, style.text);
+    HGDIOBJ oldFont = SelectObject(hdc, g_fontBold);
+    DrawTextW(hdc, style.label, -1, &rc, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
+    SelectObject(hdc, oldFont);
+}
+
+// ============================================================
+// WM_DRAWITEM
+// ============================================================
+void OnDrawItem(LPDRAWITEMSTRUCT dis) {
+    HDC hdc = dis->hDC;
+    RECT rc = dis->rcItem;
+
+    // Фон окна
+    DrawGradientRect(hdc, rc, COL_PANEL, COL_PANEL_LIGHT);
+
+    switch (dis->CtlID) {
+    case IDC_BTN_ENCODE: {
+        ButtonStyle s = {
+            RGB(50, 120, 240), RGB(70, 150, 255),
+            RGB(120, 180, 255), RGB(255, 255, 255),
+            L"→  ENCODE",
+            0, &g_hoverEncode, &g_encodeBtnGlow,
+            RGB(90, 150, 255)
+        };
+        DrawStyledButton(hdc, rc, s);
+        break;
+    }
+
+    case IDC_BTN_DECODE: {
+        ButtonStyle s = {
+            RGB(60, 160, 90), RGB(80, 200, 120),
+            RGB(120, 230, 150), RGB(255, 255, 255),
+            L"←  DECODE",
+            0, &g_hoverDecode, &g_decodeBtnGlow,
+            RGB(80, 220, 130)
+        };
+        DrawStyledButton(hdc, rc, s);
+        break;
+    }
+
+    case IDC_BTN_CLEAR: {
+        ButtonStyle s = {
+            RGB(120, 50, 60), RGB(160, 70, 80),
+            RGB(220, 100, 110), RGB(255, 255, 255),
+            L"✕  Очистить",
+            0, &g_hoverClear, nullptr,
+            RGB(240, 90, 100)
+        };
+        DrawStyledButton(hdc, rc, s);
+        break;
+    }
+
+    case IDC_BTN_PASTE: {
+        ButtonStyle s = {
+            RGB(60, 60, 90), RGB(80, 80, 120),
+            RGB(120, 120, 160), RGB(255, 255, 255),
+            L"📋  Вставить",
+            0, &g_hoverPaste, nullptr,
+            RGB(140, 140, 200)
+        };
+        DrawStyledButton(hdc, rc, s);
+        break;
+    }
+
+    case IDC_BTN_SWAP: {
+        ButtonStyle s = {
+            RGB(70, 70, 100), RGB(90, 90, 130),
+            RGB(130, 130, 170), RGB(255, 255, 255),
+            L"⇅  Swap",
+            0, &g_hoverSwap, nullptr,
+            RGB(150, 150, 200)
+        };
+        DrawStyledButton(hdc, rc, s);
+        break;
+    }
+
+    case IDC_BTN_LOAD: {
+        ButtonStyle s = {
+            RGB(80, 60, 100), RGB(110, 80, 140),
+            RGB(160, 120, 200), RGB(255, 255, 255),
+            L"📂  Загрузить",
+            0, &g_hoverLoad, nullptr,
+            RGB(180, 120, 255)
+        };
+        DrawStyledButton(hdc, rc, s);
+        break;
+    }
+
+    case IDC_BTN_SAVE: {
+        ButtonStyle s = {
+            RGB(50, 90, 120), RGB(70, 120, 160),
+            RGB(120, 170, 220), RGB(255, 255, 255),
+            L"💾  Сохранить",
+            0, &g_hoverSave, nullptr,
+            RGB(100, 200, 240)
+        };
+        DrawStyledButton(hdc, rc, s);
+        break;
+    }
+
+    case IDC_BTN_OPEN_DIR: {
+        ButtonStyle s = {
+            RGB(100, 80, 50), RGB(140, 110, 70),
+            RGB(200, 160, 110), RGB(255, 255, 255),
+            L"📁  Открыть папку",
+            0, &g_hoverOpenDir, nullptr,
+            RGB(255, 190, 80)
+        };
+        DrawStyledButton(hdc, rc, s);
+        break;
+    }
+
+    case IDC_BTN_COPY_OUT: {
+        ButtonStyle s = {
+            RGB(70, 70, 90), RGB(100, 100, 130),
+            RGB(150, 150, 190), RGB(255, 255, 255),
+            L"📄  Скопировать",
+            0, &g_hoverCopy, nullptr,
+            RGB(160, 160, 220)
+        };
+        DrawStyledButton(hdc, rc, s);
+        break;
+    }
+
+    case IDC_BTN_HISTORY_CLR: {
+        ButtonStyle s = {
+            RGB(100, 40, 50), RGB(140, 60, 70),
+            RGB(200, 90, 100), RGB(255, 255, 255),
+            L"🗑  Очистить историю",
+            0, &g_hoverHistClr, nullptr,
+            RGB(240, 90, 100)
+        };
+        DrawStyledButton(hdc, rc, s);
+        break;
+    }
+    }
+}
+
+// ============================================================
+// WM_MEASUREITEM
+// ============================================================
+void OnMeasureItem(LPMEASUREITEMSTRUCT mis) {
+    if (mis->CtlID == IDC_HISTORY_LIST) {
+        mis->itemHeight = 28;
+    }
+}
+
+// ============================================================
+// Отрисовка строки истории
+// ============================================================
+void OnDrawHistoryItem(LPDRAWITEMSTRUCT dis) {
+    HDC hdc = dis->hDC;
+    RECT rc = dis->rcItem;
+
+    bool selected = (dis->itemState & ODS_SELECTED) != 0;
+
+    if (dis->itemID == (UINT)-1) return;
+
+    // Фон
+    COLORREF bg = selected ? COL_ACCENT_DK :
+        (dis->itemID % 2 == 0) ? COL_PANEL : COL_BG2;
+    HBRUSH bgBr = CreateSolidBrush(bg);
+    FillRect(hdc, &rc, bgBr);
+    DeleteObject(bgBr);
+
+    // Границы
+    HBRUSH ob = (HBRUSH)SelectObject(hdc, GetStockObject(NULL_BRUSH));
+    HPEN pen = CreatePen(PS_SOLID, 1, COL_BORDER);
+    HGDIOBJ op = SelectObject(hdc, pen);
+    Rectangle(hdc, rc.left, rc.top, rc.right, rc.bottom);
+    SelectObject(hdc, ob);
+    SelectObject(hdc, op);
+    DeleteObject(pen);
+
+    // Получаем данные
+    int idx = (int)dis->itemID;
+    if (idx < 0 || idx >= (int)g_history.size()) return;
+
+    const HistoryEntry& e = g_history[idx];
+
+    // Иконка типа
+    tm ti;
+    localtime_s(&ti, &e.time);
+
+    wchar_t typeBuf[8];
+    wcscpy_s(typeBuf, e.isEncode ? L"EN" : L"DE");
+
+    RECT typeRc = { rc.left + 8, rc.top + 4, rc.left + 46, rc.bottom - 4 };
+    COLORREF typeCol = e.isEncode ? COL_SUCCESS : COL_INFO;
+
+    // Скруглённая "пилюля" для типа
+    HBRUSH typeBr = CreateSolidBrush(typeCol);
+    HPEN typePen = CreatePen(PS_NULL, 0, typeCol);
+    HGDIOBJ ob2 = SelectObject(hdc, typeBr);
+    HGDIOBJ op2 = SelectObject(hdc, typePen);
+    RoundRect(hdc, typeRc.left, typeRc.top, typeRc.right, typeRc.bottom, 8, 8);
+    SelectObject(hdc, ob2);
+    SelectObject(hdc, op2);
+    DeleteObject(typeBr);
+    DeleteObject(typePen);
+
+    SetBkMode(hdc, TRANSPARENT);
+    SetTextColor(hdc, RGB(20, 30, 20));
+    HGDIOBJ oldFont = SelectObject(hdc, g_fontBold);
+    DrawTextW(hdc, typeBuf, -1, &typeRc, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
+
+    // Название режима
+    RECT modeRc = { rc.left + 56, rc.top, rc.left + 200, rc.bottom };
+    SetTextColor(hdc, COL_ACCENT_LT);
+    SelectObject(hdc, g_fontMonoBold);
+    DrawTextW(hdc, g_modes[e.mode].name, -1, &modeRc, DT_LEFT | DT_VCENTER | DT_SINGLELINE);
+
+    // Время
+    wchar_t timeBuf[32];
+    swprintf(timeBuf, 32, L"%02d:%02d:%02d", ti.tm_hour, ti.tm_min, ti.tm_sec);
+
+    RECT timeRc = { rc.left + 210, rc.top, rc.left + 290, rc.bottom };
+    SetTextColor(hdc, COL_TEXT_DIM);
+    SelectObject(hdc, g_fontMono);
+    DrawTextW(hdc, timeBuf, -1, &timeRc, DT_LEFT | DT_VCENTER | DT_SINGLELINE);
+
+    // Превью входа
+    RECT inRc = { rc.left + 300, rc.top, rc.left + (rc.right - rc.left) / 2, rc.bottom };
+    SetTextColor(hdc, COL_TEXT);
+    DrawTextW(hdc, e.inputPreview.c_str(), -1, &inRc,
+        DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
+
+    // Стрелка
+    RECT arrRc = { rc.left + (rc.right - rc.left) / 2, rc.top,
+                  rc.left + (rc.right - rc.left) / 2 + 40, rc.bottom };
+    SetTextColor(hdc, COL_TEXT_FAINT);
+    DrawTextW(hdc, L"  →  ", -1, &arrRc, DT_LEFT | DT_VCENTER | DT_SINGLELINE);
+
+    // Превью выхода
+    RECT outRc = { rc.left + (rc.right - rc.left) / 2 + 40, rc.top, rc.right - 10, rc.bottom };
+    SetTextColor(hdc, COL_WARNING);
+    DrawTextW(hdc, e.outputPreview.c_str(), -1, &outRc,
+        DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
+
+    SelectObject(hdc, oldFont);
+}
+
+// ============================================================
+// Отрисовка фона окна
+// ============================================================
+void DrawHeader(HDC hdc, RECT rc) {
+    // Верхняя панель — градиент
+    RECT headerRc = { 0, 0, rc.right, 110 };
+    DrawGradientRect(hdc, headerRc, RGB(24, 28, 42), RGB(30, 34, 50));
+
+    // Акцентная полоса снизу
+    RECT accentRc = { 0, 108, rc.right, 110 };
+    DrawGradientRect(hdc, accentRc, COL_ACCENT_DK, COL_ACCENT);
+
+    // Логотип
+    RECT logoRc = { 20, 15, 60, 55 };
+    DrawRoundedRect(hdc, logoRc, 10, COL_ACCENT_DK, COL_ACCENT_LT);
+
+    SetBkMode(hdc, TRANSPARENT);
+    SetTextColor(hdc, COL_TEXT_BRIGHT);
+    HGDIOBJ oldFont = SelectObject(hdc, g_fontLarge);
+    RECT lockRc = { 20, 15, 60, 55 };
+    DrawTextW(hdc, L"🔐", -1, &lockRc, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
+
+    // Заголовок
+    RECT titleRc = { 70, 12, 700, 45 };
+    SetTextColor(hdc, COL_TEXT_BRIGHT);
+    DrawTextW(hdc, L"Crypto Tool", -1, &titleRc, DT_LEFT | DT_VCENTER | DT_SINGLELINE);
+
+    // Подзаголовок
+    RECT subRc = { 70, 45, 700, 70 };
+    SetTextColor(hdc, COL_TEXT_DIM);
+    SelectObject(hdc, g_fontSmall);
+    DrawTextW(hdc, L"Base64 · Base32 · Hex · URL · ROT · XOR · Caesar · Atbash · Morse · Binary",
+        -1, &subRc, DT_LEFT | DT_VCENTER | DT_SINGLELINE);
+
+    // Инфо режима справа
+    RECT modeInfoRc = { 700, 15, rc.right - 20, 95 };
+    SetTextColor(hdc, COL_ACCENT_LT);
+    SelectObject(hdc, g_fontMedium);
+    DrawTextW(hdc, g_modes[g_mode].name, -1, &modeInfoRc,
+        DT_RIGHT | DT_TOP | DT_SINGLELINE);
+
+    RECT descRc = { rc.right - 500, 45, rc.right - 20, 90 };
+    SetTextColor(hdc, COL_TEXT_DIM);
+    SelectObject(hdc, g_fontSmall);
+    DrawTextW(hdc, g_modes[g_mode].desc, -1, &descRc,
+        DT_RIGHT | DT_TOP | DT_WORDBREAK);
+
+    // Верхняя панель — тонкая линия
+    RECT lineRc = { 0, 110, rc.right, 111 };
+    HBRUSH lineBr = CreateSolidBrush(COL_BORDER);
+    FillRect(hdc, &lineRc, lineBr);
+    DeleteObject(lineBr);
+
+    SelectObject(hdc, oldFont);
+}
+
+void DrawPanelLabels(HDC hdc) {
+    SetBkMode(hdc, TRANSPARENT);
+
+    // Метка "Режим"
+    RECT modeLabelRc = { 20, 36, 100, 58 };
+    SetTextColor(hdc, COL_TEXT_DIM);
+    HGDIOBJ oldFont = SelectObject(hdc, g_fontSmall);
+    DrawTextW(hdc, L"РЕЖИМ:", -1, &modeLabelRc, DT_LEFT | DT_VCENTER | DT_SINGLELINE);
+
+    // Метка "Ключ"
+    RECT keyLabelRc = { 360, 38, 430, 58 };
+    SetTextColor(hdc, COL_TEXT_DIM);
+    DrawTextW(hdc, L"КЛЮЧ:", -1, &keyLabelRc, DT_LEFT | DT_VCENTER | DT_SINGLELINE);
+
+    // Заголовок "Вход"
+    RECT inLabelRc = { 24, 115, 200, 130 };
+    SetTextColor(hdc, COL_SUCCESS);
+    SelectObject(hdc, g_fontBold);
+    DrawTextW(hdc, L"▼ ВХОД", -1, &inLabelRc, DT_LEFT | DT_VCENTER | DT_SINGLELINE);
+
+    // Заголовок "Выход"
+    RECT outLabelRc = { 724, 115, 900, 130 };
+    SetTextColor(hdc, COL_WARNING);
+    DrawTextW(hdc, L"▲ ВЫХОД", -1, &outLabelRc, DT_LEFT | DT_VCENTER | DT_SINGLELINE);
+
+    // Заголовок "История"
+    RECT histLabelRc = { 24, 542, 300, 560 };
+    SetTextColor(hdc, COL_PURPLE);
+    DrawTextW(hdc, L"📜 ИСТОРИЯ ОПЕРАЦИЙ", -1, &histLabelRc, DT_LEFT | DT_VCENTER | DT_SINGLELINE);
+
+    SelectObject(hdc, oldFont);
+
+    // Рамки вокруг EDIT'ов
+    HBRUSH ob = (HBRUSH)SelectObject(hdc, GetStockObject(NULL_BRUSH));
+    HPEN pen = CreatePen(PS_SOLID, 2, COL_BORDER_LT);
+    HGDIOBJ op = SelectObject(hdc, pen);
+
+    RECT inFrame = { 18, 128, 682, 482 };
+    Rectangle(hdc, inFrame.left, inFrame.top, inFrame.right, inFrame.bottom);
+
+    RECT outFrame = { 718, 128, 1382, 482 };
+    Rectangle(hdc, outFrame.left, outFrame.top, outFrame.right, outFrame.bottom);
+
+    SelectObject(hdc, ob);
+    SelectObject(hdc, op);
+    DeleteObject(pen);
+}
+
+void DrawBackground(HDC hdc, RECT rc) {
+    // Основной фон — градиент
+    DrawGradientRect(hdc, rc, COL_BG, COL_BG2);
+
+    // Полупрозрачные круги на фоне (декор)
+    HBRUSH ob = (HBRUSH)SelectObject(hdc, GetStockObject(NULL_BRUSH));
+    HPEN pen1 = CreatePen(PS_SOLID, 1, RGB(30, 40, 70));
+    HGDIOBJ op = SelectObject(hdc, pen1);
+    for (int i = 0; i < 15; i++) {
+        int x = (i * 137) % rc.right;
+        int y = (i * 251) % rc.bottom;
+        int r = 30 + (i * 17) % 60;
+        Ellipse(hdc, x - r, y - r, x + r, y + r);
+    }
+    SelectObject(hdc, ob);
+    SelectObject(hdc, op);
+    DeleteObject(pen1);
+}
+
+void DrawCustomUI(HDC hdc) {
+    RECT rc;
+    GetClientRect(g_hwnd, &rc);
+
+    // Фон
+    DrawBackground(hdc, rc);
+
+    // Header
+    DrawHeader(hdc, rc);
+
+    // Метки
+    DrawPanelLabels(hdc);
+}
+
+// ============================================================
+// WINDOW PROC
+// ============================================================
+LRESULT CALLBACK WindowProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
+    switch (msg) {
+    case WM_CREATE:
+        return 0;
+
+    case WM_ERASEBKGND: {
+        // Рисуем фон окна
+        HDC hdc = (HDC)wp;
+        RECT rc;
+        GetClientRect(hwnd, &rc);
+        DrawCustomUI(hdc);
+        return 1;
+    }
+
+    case WM_PAINT: {
+        PAINTSTRUCT ps;
+        HDC hdc = BeginPaint(hwnd, &ps);
+
+        RECT rc;
+        GetClientRect(hwnd, &rc);
+
+        // Двойная буферизация
+        HDC memDC = CreateCompatibleDC(hdc);
+        HBITMAP memBmp = CreateCompatibleBitmap(hdc, rc.right, rc.bottom);
+        HBITMAP oldBmp = (HBITMAP)SelectObject(memDC, memBmp);
+
+        DrawCustomUI(memDC);
+
+        BitBlt(hdc, 0, 0, rc.right, rc.bottom, memDC, 0, 0, SRCCOPY);
+
+        SelectObject(memDC, oldBmp);
+        DeleteObject(memBmp);
+        DeleteDC(memDC);
+
+        EndPaint(hwnd, &ps);
+        return 0;
+    }
+
+    case WM_DRAWITEM:
+        OnDrawItem((LPDRAWITEMSTRUCT)lp);
+        return TRUE;
+
+    case WM_MEASUREITEM:
+        OnMeasureItem((LPMEASUREITEMSTRUCT)lp);
+        return TRUE;
+
+    case WM_COMMAND: {
+        int id = LOWORD(wp);
+        int code = HIWORD(wp);
+
+        switch (id) {
+        case IDC_BTN_ENCODE:   if (code == BN_CLICKED) OnEncode(); return 0;
+        case IDC_BTN_DECODE:   if (code == BN_CLICKED) OnDecode(); return 0;
+        case IDC_BTN_CLEAR:    if (code == BN_CLICKED) OnClear(); return 0;
+        case IDC_BTN_COPY_OUT: if (code == BN_CLICKED) OnCopyOutput(); return 0;
+        case IDC_BTN_PASTE:    if (code == BN_CLICKED) OnPaste(); return 0;
+        case IDC_BTN_LOAD:     if (code == BN_CLICKED) OnLoadFile(); return 0;
+        case IDC_BTN_SAVE:     if (code == BN_CLICKED) OnSaveFile(); return 0;
+        case IDC_BTN_SWAP:     if (code == BN_CLICKED) OnSwap(); return 0;
+        case IDC_BTN_OPEN_DIR: if (code == BN_CLICKED) OnOpenDir(); return 0;
+        case IDC_BTN_HISTORY_CLR: if (code == BN_CLICKED) OnClearHistory(); return 0;
+
+        case IDC_COMBO_MODE:
+            if (code == CBN_SELCHANGE) {
+                g_mode = (int)SendMessageW(g_hComboMode, CB_GETCURSEL, 0, 0);
+                UpdateInfo();
+                // Перерисовать header
+                InvalidateRect(hwnd, nullptr, TRUE);
+            }
+            return 0;
+
+        case IDC_EDIT_INPUT:
+            if (code == EN_CHANGE) UpdateInfo();
+            return 0;
+
+        case IDC_HISTORY_LIST:
+            if (code == LBN_DBLCLK) {
+                int sel = (int)SendMessageW(g_hHistoryList, LB_GETCURSEL, 0, 0);
+                if (sel >= 0 && sel < (int)g_history.size()) {
+                    SetWindowTextW(g_hEditInput, g_history[sel].inputPreview.c_str());
+                    SetWindowTextW(g_hEditOutput, g_history[sel].outputPreview.c_str());
+                }
+            }
+            return 0;
+        }
+        return 0;
+    }
+
+    case WM_MOUSEMOVE: {
+        g_mouseX = GET_X_LPARAM(lp);
+        g_mouseY = GET_Y_LPARAM(lp);
+
+        HWND h;
+        RECT rc;
+
+        auto updateHover = [&](HWND btn, bool& flag) {
+            GetWindowRect(btn, &rc);
+            MapWindowPoints(HWND_DESKTOP, hwnd, (LPPOINT)&rc, 2);
+            bool inside = (g_mouseX >= rc.left && g_mouseX < rc.right &&
+                g_mouseY >= rc.top && g_mouseY < rc.bottom);
+            if (inside != flag) {
+                flag = inside;
+                InvalidateRect(btn, nullptr, TRUE);
+            }
+            };
+
+        updateHover(g_hBtnEncode, g_hoverEncode);
+        updateHover(g_hBtnDecode, g_hoverDecode);
+        updateHover(g_hBtnClear, g_hoverClear);
+        updateHover(g_hBtnCopyOut, g_hoverCopy);
+        updateHover(g_hBtnPaste, g_hoverPaste);
+        updateHover(g_hBtnLoad, g_hoverLoad);
+        updateHover(g_hBtnSave, g_hoverSave);
+        updateHover(g_hBtnSwap, g_hoverSwap);
+        updateHover(g_hBtnOpenDir, g_hoverOpenDir);
+        updateHover(g_hBtnHistoryClr, g_hoverHistClr);
+
+        return 0;
+    }
+
+    case WM_TIMER: {
+        if (wp == 1) {
+            DWORD now = GetTickCount();
+            float dt = (now - g_lastTick) / 1000.0f;
+            g_lastTick = now;
+            if (dt > 0.1f) dt = 0.1f;
+            g_animTime += dt;
+
+            // Затухание свечения
+            if (g_encodeBtnGlow > 0) {
+                g_encodeBtnGlow -= dt * 2.0f;
+                if (g_encodeBtnGlow < 0) g_encodeBtnGlow = 0;
+                InvalidateRect(g_hBtnEncode, nullptr, TRUE);
+            }
+            if (g_decodeBtnGlow > 0) {
+                g_decodeBtnGlow -= dt * 2.0f;
+                if (g_decodeBtnGlow < 0) g_decodeBtnGlow = 0;
+                InvalidateRect(g_hBtnDecode, nullptr, TRUE);
+            }
+        }
+        return 0;
+    }
+
+    case WM_KEYDOWN: {
+        if (GetKeyState(VK_CONTROL) & 0x8000) {
+            if (wp == 'V') { OnPaste(); return 0; }
+            if (wp == 'C') { OnCopyOutput(); return 0; }
+            if (wp == 'S') { OnSaveFile(); return 0; }
+            if (wp == 'O') { OnLoadFile(); return 0; }
+            if (wp == 'L') { OnClear(); return 0; }
+        }
+
+        if (wp == VK_F5) { OnEncode(); return 0; }
+        if (wp == VK_F6) { OnDecode(); return 0; }
+
+        return 0;
+    }
+
+    case WM_CTLCOLORSTATIC: {
+        HDC hdc = (HDC)wp;
+        HWND h = (HWND)lp;
+        SetBkMode(hdc, TRANSPARENT);
+        SetTextColor(hdc, COL_TEXT_DIM);
+        if (h == g_hStaticInfo) SetTextColor(hdc, COL_TEXT);
+        return (LRESULT)GetStockObject(NULL_BRUSH);
+    }
+
+    case WM_CTLCOLOREDIT: {
+        HDC hdc = (HDC)wp;
+        HWND h = (HWND)lp;
+        SetBkColor(hdc, COL_EDITOR_BG);
+        SetTextColor(hdc, COL_EDITOR_TEXT);
+        if (h == g_hEditKey) {
+            SetTextColor(hdc, COL_ACCENT_LT);
+        }
+        if (h == g_hEditOutput) {
+            SetTextColor(hdc, COL_WARNING);
+        }
+        return (LRESULT)CreateSolidBrush(COL_EDITOR_BG);
+    }
+
+    case WM_CTLCOLORLISTBOX: {
+        HDC hdc = (HDC)wp;
+        SetBkColor(hdc, COL_PANEL);
+        SetTextColor(hdc, COL_TEXT);
+        return (LRESULT)CreateSolidBrush(COL_PANEL);
+    }
+
+    case WM_CTLCOLORBTN: {
+        // Кнопки owner-drawn — фон не нужен
+        return (LRESULT)GetStockObject(NULL_BRUSH);
+    }
+
+    case WM_CLOSE:
+        DestroyWindow(hwnd);
+        return 0;
+
+    case WM_DESTROY: {
+        KillTimer(hwnd, 1);
+        PostQuitMessage(0);
+        return 0;
+    }
+    }
+
+    return DefWindowProcW(hwnd, msg, wp, lp);
+}
+
+// ============================================================
+// ИНИЦИАЛИЗАЦИЯ
+// ============================================================
+void InitApp(HWND hwnd) {
+    g_hwnd = hwnd;
+    SetupFonts();
+    CreateControls(hwnd);
+    g_lastTick = GetTickCount();
+    SetTimer(hwnd, 1, 30, nullptr);
+}
+
+void ShutdownApp() {
+    if (g_fontSmall) DeleteObject(g_fontSmall);
+    if (g_fontMedium) DeleteObject(g_fontMedium);
+    if (g_fontLarge) DeleteObject(g_fontLarge);
+    if (g_fontMono) DeleteObject(g_fontMono);
+    if (g_fontMonoBold) DeleteObject(g_fontMonoBold);
+    if (g_fontBold) DeleteObject(g_fontBold);
+    if (g_fontIcon) DeleteObject(g_fontIcon);
+}
+
+// ============================================================
+// ТОЧКА ВХОДА
+// ============================================================
+int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, LPWSTR, int nCmdShow) {
+    g_hInst = hInst;
+
+    INITCOMMONCONTROLSEX icc = {};
+    icc.dwSize = sizeof(icc);
+    icc.dwICC = ICC_WIN95_CLASSES;
+    InitCommonControlsEx(&icc);
+
+    WNDCLASSEXW wc = {};
+    wc.cbSize = sizeof(wc);
+    wc.style = CS_HREDRAW | CS_VREDRAW | CS_DBLCLKS;
+    wc.lpfnWndProc = WindowProc;
+    wc.hInstance = hInst;
+    wc.hCursor = LoadCursor(nullptr, IDC_ARROW);
+    wc.hbrBackground = nullptr;   // рисуем сами
+    wc.lpszClassName = L"CryptoToolUltimateClass";
+    wc.hIcon = LoadIcon(nullptr, IDI_APPLICATION);
+
+    if (!RegisterClassExW(&wc)) return 1;
+
+    RECT rc = { 0, 0, WINDOW_W, WINDOW_H };
+    AdjustWindowRect(&rc, WS_OVERLAPPEDWINDOW, FALSE);
+
+    HWND hwnd = CreateWindowExW(
+        0, L"CryptoToolUltimateClass",
+        L"Crypto Tool Ultimate — эстетика шифрования",
+        WS_OVERLAPPEDWINDOW,
+        CW_USEDEFAULT, CW_USEDEFAULT,
+        rc.right - rc.left, rc.bottom - rc.top,
+        nullptr, nullptr, hInst, nullptr
+    );
+
+    if (!hwnd) return 1;
+
+    InitApp(hwnd);
+
+    // Тёмный заголовок окна (Windows 10+)
+    BOOL dark = TRUE;
+    DwmSetWindowAttribute(hwnd, 20, &dark, sizeof(dark));
+    DwmSetWindowAttribute(hwnd, 19, &dark, sizeof(dark));
+
+    ShowWindow(hwnd, nCmdShow);
+    UpdateWindow(hwnd);
+
+    MSG msg = {};
+    while (GetMessageW(&msg, nullptr, 0, 0)) {
+        if (!IsDialogMessageW(hwnd, &msg)) {
+            TranslateMessage(&msg);
+            DispatchMessageW(&msg);
+        }
+    }
+
+    ShutdownApp();
+    return (int)msg.wParam;
+}
